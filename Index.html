@@ -3,17 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebRTC File Share</title>
+    <title>Simple File Share</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
 </head>
 <body class="bg-gray-100 min-h-screen">
     <div class="container mx-auto px-4 py-8">
-        <h1 class="text-3xl font-bold text-center mb-8 text-blue-600">WebRTC File Share</h1>
+        <h1 class="text-3xl font-bold text-center mb-8 text-blue-600">Simple File Share</h1>
         
         <div class="max-w-md mx-auto bg-white rounded-lg shadow-md p-6">
-            <div id="senderSection" class="space-y-4">
-                <h2 class="text-xl font-semibold text-gray-800">Send Files</h2>
+            <div class="space-y-4">
+                <h2 class="text-xl font-semibold text-gray-800">Share Files</h2>
                 <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center" id="dropArea">
                     <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48">
                         <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
@@ -27,38 +26,26 @@
                 
                 <div id="fileList" class="space-y-2"></div>
                 
-                <div class="flex items-center justify-between">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700">Your ID:</label>
-                        <div id="localId" class="text-sm text-gray-500 bg-gray-100 p-1 rounded mt-1">Generating...</div>
-                    </div>
-                    <button id="shareButton" class="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50">
-                        Share
-                    </button>
-                </div>
-            </div>
-            
-            <div id="receiverSection" class="space-y-4 hidden">
-                <h2 class="text-xl font-semibold text-gray-800">Receive Files</h2>
-                <div class="space-y-2">
-                    <label class="block text-sm font-medium text-gray-700">Enter Sender ID:</label>
-                    <input type="text" id="remoteId" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
-                </div>
-                <button id="connectButton" class="w-full px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50">
-                    Connect
+                <button id="uploadButton" class="w-full px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50">
+                    Upload Files
                 </button>
                 
-                <div id="incomingFiles" class="space-y-2"></div>
+                <div id="shareLink" class="hidden">
+                    <p class="text-sm font-medium text-gray-700 mb-2">Share this link:</p>
+                    <div class="flex">
+                        <input type="text" id="linkInput" class="flex-grow px-3 py-2 border border-gray-300 rounded-l-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" readonly>
+                        <button id="copyButton" class="px-4 py-2 bg-blue-500 text-white rounded-r-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50">
+                            Copy
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
         
-        <div id="connectionStatus" class="mt-4 text-center hidden">
-            <div class="inline-flex items-center px-4 py-2 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
-                <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Connecting...
+        <div class="max-w-md mx-auto bg-white rounded-lg shadow-md p-6 mt-4 hidden" id="downloadSection">
+            <div class="space-y-4">
+                <h2 class="text-xl font-semibold text-gray-800">Download Files</h2>
+                <div id="fileListDownload" class="space-y-2"></div>
             </div>
         </div>
     </div>
@@ -66,57 +53,19 @@
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             // DOM elements
-            const senderSection = document.getElementById('senderSection');
-            const receiverSection = document.getElementById('receiverSection');
             const fileInput = document.getElementById('fileInput');
             const browseButton = document.getElementById('browseButton');
             const dropArea = document.getElementById('dropArea');
             const fileList = document.getElementById('fileList');
-            const localId = document.getElementById('localId');
-            const shareButton = document.getElementById('shareButton');
-            const remoteId = document.getElementById('remoteId');
-            const connectButton = document.getElementById('connectButton');
-            const incomingFiles = document.getElementById('incomingFiles');
-            const connectionStatus = document.getElementById('connectionStatus');
+            const uploadButton = document.getElementById('uploadButton');
+            const shareLink = document.getElementById('shareLink');
+            const linkInput = document.getElementById('linkInput');
+            const copyButton = document.getElementById('copyButton');
+            const downloadSection = document.getElementById('downloadSection');
+            const fileListDownload = document.getElementById('fileListDownload');
             
-            // Initialize PeerJS
-            const peer = new Peer();
             let selectedFiles = [];
-            let connections = {};
-            
-            // Generate local peer ID
-            peer.on('open', (id) => {
-                localId.textContent = id;
-            });
-            
-            // Handle incoming connections
-            peer.on('connection', (conn) => {
-                connectionStatus.classList.remove('hidden');
-                connectionStatus.innerHTML = `
-                    <div class="inline-flex items-center px-4 py-2 rounded-full text-sm font-medium bg-green-100 text-green-800">
-                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                        </svg>
-                        Connected to ${conn.peer}
-                    </div>
-                `;
-                
-                conn.on('data', (data) => {
-                    if (data.type === 'file') {
-                        receiveFile(data);
-                    }
-                });
-                
-                conn.on('close', () => {
-                    connectionStatus.innerHTML = `
-                        <div class="inline-flex items-center px-4 py-2 rounded-full text-sm font-medium bg-red-100 text-red-800">
-                            Connection closed
-                        </div>
-                    `;
-                });
-                
-                connections[conn.peer] = conn;
-            });
+            let uploadedFiles = [];
             
             // File selection
             browseButton.addEventListener('click', () => {
@@ -176,7 +125,7 @@
                                 <p class="text-xs text-gray-500">${formatFileSize(file.size)}</p>
                             </div>
                         </div>
-                        <button class="text-red-500 hover:text-red-700">
+                        <button class="text-red-500 hover:text-red-700 remove-file" data-index="${selectedFiles.indexOf(file)}">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
                             </svg>
@@ -185,7 +134,16 @@
                     fileList.appendChild(fileItem);
                 });
                 
-                shareButton.disabled = selectedFiles.length === 0;
+                // Add remove file functionality
+                document.querySelectorAll('.remove-file').forEach(button => {
+                    button.addEventListener('click', (e) => {
+                        const index = parseInt(e.currentTarget.dataset.index);
+                        selectedFiles.splice(index, 1);
+                        handleFiles(selectedFiles);
+                    });
+                });
+                
+                uploadButton.disabled = selectedFiles.length === 0;
             }
             
             function formatFileSize(bytes) {
@@ -196,111 +154,57 @@
                 return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
             }
             
-            // Share files
-            shareButton.addEventListener('click', () => {
+            // Upload files
+            uploadButton.addEventListener('click', () => {
                 if (selectedFiles.length === 0) return;
                 
-                const shareableLink = `${window.location.origin}${window.location.pathname}?id=${peer.id}`;
-                
-                // Copy to clipboard
-                navigator.clipboard.writeText(shareableLink).then(() => {
-                    alert('Shareable link copied to clipboard!');
-                }).catch(err => {
-                    console.error('Could not copy text: ', err);
-                });
-            });
-            
-            // Connect to receiver
-            connectButton.addEventListener('click', () => {
-                const id = remoteId.value.trim();
-                if (!id) {
-                    alert('Please enter a valid Peer ID');
-                    return;
-                }
-                
-                connectionStatus.classList.remove('hidden');
-                connectionStatus.innerHTML = `
-                    <div class="inline-flex items-center px-4 py-2 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
-                        <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        Connecting...
-                    </div>
-                `;
-                
-                const conn = peer.connect(id);
-                
-                conn.on('open', () => {
-                    connectionStatus.innerHTML = `
-                        <div class="inline-flex items-center px-4 py-2 rounded-full text-sm font-medium bg-green-100 text-green-800">
-                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                            </svg>
-                            Connected to ${id}
-                        </div>
-                    `;
-                    
-                    // Send files
-                    selectedFiles.forEach(file => {
-                        sendFile(conn, file);
-                    });
+                const formData = new FormData();
+                selectedFiles.forEach(file => {
+                    formData.append('files', file);
                 });
                 
-                conn.on('error', (err) => {
-                    connectionStatus.innerHTML = `
-                        <div class="inline-flex items-center px-4 py-2 rounded-full text-sm font-medium bg-red-100 text-red-800">
-                            Connection failed: ${err.message}
-                        </div>
-                    `;
-                });
-            });
-            
-            // Send file
-            function sendFile(conn, file) {
-                const chunkSize = 16 * 1024; // 16KB chunks
-                let offset = 0;
-                
-                // Send file metadata first
-                conn.send({
-                    type: 'file',
-                    name: file.name,
-                    size: file.size,
-                    type: file.type
-                });
-                
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    const chunk = e.target.result;
-                    if (chunk) {
-                        conn.send({
-                            type: 'file_chunk',
-                            chunk: chunk
-                        });
-                        offset += chunkSize;
+                fetch('https://file.io/', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const fileUrl = data.link;
+                        shareLink.classList.remove('hidden');
+                        linkInput.value = fileUrl;
                         
-                        if (offset < file.size) {
-                            readNextChunk();
-                        }
+                        // Store uploaded files
+                        uploadedFiles.push({
+                            name: selectedFiles[0].name,
+                            url: fileUrl
+                        });
+                        
+                        // Show download section if not already shown
+                        downloadSection.classList.remove('hidden');
+                        updateDownloadList();
+                    } else {
+                        alert('Upload failed');
                     }
-                };
-                
-                reader.onerror = (err) => {
-                    console.error('Error reading file:', err);
-                };
-                
-                function readNextChunk() {
-                    const slice = file.slice(offset, offset + chunkSize);
-                    reader.readAsArrayBuffer(slice);
-                }
-                
-                readNextChunk();
-            }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Upload failed: ' + error.message);
+                });
+            });
             
-            // Receive file
-            function receiveFile(data) {
-                if (data.type === 'file') {
-                    const fileData = data;
+            // Copy link
+            copyButton.addEventListener('click', () => {
+                linkInput.select();
+                document.execCommand('copy');
+                alert('Link copied to clipboard!');
+            });
+            
+            // Update download list
+            function updateDownloadList() {
+                fileListDownload.innerHTML = '';
+                
+                uploadedFiles.forEach((file, index) => {
                     const fileItem = document.createElement('div');
                     fileItem.className = 'flex items-center justify-between bg-gray-50 p-3 rounded';
                     fileItem.innerHTML = `
@@ -309,34 +213,30 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                             </svg>
                             <div>
-                                <p class="text-sm font-medium text-gray-700">${fileData.name}</p>
-                                <p class="text-xs text-gray-500">${formatFileSize(fileData.size)}</p>
+                                <p class="text-sm font-medium text-gray-700">${file.name}</p>
                             </div>
                         </div>
-                        <button class="text-blue-500 hover:text-blue-700 download-btn" data-name="${fileData.name}" data-size="${fileData.size}" data-type="${fileData.type}">
+                        <a href="${file.url}" target="_blank" class="text-blue-500 hover:text-blue-700 download-btn">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
                             </svg>
-                        </button>
+                        </a>
                     `;
-                    incomingFiles.appendChild(fileItem);
-                    
-                    // Set up download handler
-                    const downloadBtn = fileItem.querySelector('.download-btn');
-                    downloadBtn.addEventListener('click', () => {
-                        alert('File download started!');
-                        // In a real implementation, you would save the received chunks here
-                    });
-                }
+                    fileListDownload.appendChild(fileItem);
+                });
             }
             
-            // Check if we're in receiver mode
+            // Check for file.io links in URL
             const urlParams = new URLSearchParams(window.location.search);
-            const peerId = urlParams.get('id');
-            if (peerId) {
-                senderSection.classList.add('hidden');
-                receiverSection.classList.remove('hidden');
-                remoteId.value = peerId;
+            const fileUrl = urlParams.get('file');
+            if (fileUrl) {
+                // This is a simple demo - in a real app, you'd fetch the file info
+                uploadedFiles.push({
+                    name: 'downloaded_file.txt',
+                    url: fileUrl
+                });
+                downloadSection.classList.remove('hidden');
+                updateDownloadList();
             }
         });
     </script>
