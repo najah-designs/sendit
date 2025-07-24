@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple File Share</title>
+    <title>Local File Share</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-100 min-h-screen">
     <div class="container mx-auto px-4 py-8">
-        <h1 class="text-3xl font-bold text-center mb-8 text-blue-600">Simple File Share</h1>
+        <h1 class="text-3xl font-bold text-center mb-8 text-blue-600">Local File Share</h1>
         
         <div class="max-w-md mx-auto bg-white rounded-lg shadow-md p-6">
             <div class="space-y-4">
@@ -26,8 +26,8 @@
                 
                 <div id="fileList" class="space-y-2"></div>
                 
-                <button id="uploadButton" class="w-full px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50">
-                    Upload Files
+                <button id="createLinkButton" class="w-full px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50">
+                    Create Shareable Link
                 </button>
                 
                 <div id="shareLink" class="hidden">
@@ -57,7 +57,7 @@
             const browseButton = document.getElementById('browseButton');
             const dropArea = document.getElementById('dropArea');
             const fileList = document.getElementById('fileList');
-            const uploadButton = document.getElementById('uploadButton');
+            const createLinkButton = document.getElementById('createLinkButton');
             const shareLink = document.getElementById('shareLink');
             const linkInput = document.getElementById('linkInput');
             const copyButton = document.getElementById('copyButton');
@@ -65,7 +65,7 @@
             const fileListDownload = document.getElementById('fileListDownload');
             
             let selectedFiles = [];
-            let uploadedFiles = [];
+            let sharedFiles = [];
             
             // File selection
             browseButton.addEventListener('click', () => {
@@ -143,7 +143,7 @@
                     });
                 });
                 
-                uploadButton.disabled = selectedFiles.length === 0;
+                createLinkButton.disabled = selectedFiles.length === 0;
             }
             
             function formatFileSize(bytes) {
@@ -154,42 +154,36 @@
                 return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
             }
             
-            // Upload files
-            uploadButton.addEventListener('click', () => {
+            // Create shareable link
+            createLinkButton.addEventListener('click', () => {
                 if (selectedFiles.length === 0) return;
                 
-                const formData = new FormData();
-                selectedFiles.forEach(file => {
-                    formData.append('files', file);
+                // Create a data URL for each file
+                const filePromises = selectedFiles.map(file => {
+                    return new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            resolve({
+                                name: file.name,
+                                size: file.size,
+                                type: file.type,
+                                dataUrl: e.target.result
+                            });
+                        };
+                        reader.readAsDataURL(file);
+                    });
                 });
                 
-                fetch('https://file.io/', {
-                    method: 'POST',
-                    body: formData
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        const fileUrl = data.link;
-                        shareLink.classList.remove('hidden');
-                        linkInput.value = fileUrl;
-                        
-                        // Store uploaded files
-                        uploadedFiles.push({
-                            name: selectedFiles[0].name,
-                            url: fileUrl
-                        });
-                        
-                        // Show download section if not already shown
-                        downloadSection.classList.remove('hidden');
-                        updateDownloadList();
-                    } else {
-                        alert('Upload failed');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    alert('Upload failed: ' + error.message);
+                Promise.all(filePromises).then(files => {
+                    // Store files in local storage
+                    localStorage.setItem('sharedFiles', JSON.stringify(files));
+                    
+                    // Create shareable URL
+                    const shareableLink = `${window.location.origin}${window.location.pathname}?share=${Date.now()}`;
+                    
+                    // Show share link
+                    shareLink.classList.remove('hidden');
+                    linkInput.value = shareableLink;
                 });
             });
             
@@ -204,7 +198,7 @@
             function updateDownloadList() {
                 fileListDownload.innerHTML = '';
                 
-                uploadedFiles.forEach((file, index) => {
+                sharedFiles.forEach((file, index) => {
                     const fileItem = document.createElement('div');
                     fileItem.className = 'flex items-center justify-between bg-gray-50 p-3 rounded';
                     fileItem.innerHTML = `
@@ -214,9 +208,10 @@
                             </svg>
                             <div>
                                 <p class="text-sm font-medium text-gray-700">${file.name}</p>
+                                <p class="text-xs text-gray-500">${formatFileSize(file.size)}</p>
                             </div>
                         </div>
-                        <a href="${file.url}" target="_blank" class="text-blue-500 hover:text-blue-700 download-btn">
+                        <a href="${file.dataUrl}" download="${file.name}" class="text-blue-500 hover:text-blue-700 download-btn">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
                             </svg>
@@ -226,17 +221,19 @@
                 });
             }
             
-            // Check for file.io links in URL
+            // Check for shared files in URL
             const urlParams = new URLSearchParams(window.location.search);
-            const fileUrl = urlParams.get('file');
-            if (fileUrl) {
-                // This is a simple demo - in a real app, you'd fetch the file info
-                uploadedFiles.push({
-                    name: 'downloaded_file.txt',
-                    url: fileUrl
-                });
-                downloadSection.classList.remove('hidden');
-                updateDownloadList();
+            const shareId = urlParams.get('share');
+            if (shareId) {
+                // Load shared files from local storage
+                const storedFiles = localStorage.getItem('sharedFiles');
+                if (storedFiles) {
+                    sharedFiles = JSON.parse(storedFiles);
+                    downloadSection.classList.remove('hidden');
+                    updateDownloadList();
+                } else {
+                    alert('No files found for this link');
+                }
             }
         });
     </script>
