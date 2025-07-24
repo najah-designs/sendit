@@ -3,12 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Local File Share</title>
+    <title>Global WebRTC File Share</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
 </head>
 <body class="bg-gray-100 min-h-screen">
     <div class="container mx-auto px-4 py-8">
-        <h1 class="text-3xl font-bold text-center mb-8 text-blue-600">Local File Share</h1>
+        <h1 class="text-3xl font-bold text-center mb-8 text-blue-600">Global WebRTC File Share</h1>
         
         <div class="max-w-md mx-auto bg-white rounded-lg shadow-md p-6">
             <div class="space-y-4">
@@ -39,6 +40,16 @@
                         </button>
                     </div>
                 </div>
+                
+                <div id="connectionStatus" class="hidden">
+                    <p class="text-sm font-medium text-gray-700 mb-2">Connection Status:</p>
+                    <div id="statusIndicator" class="flex items-center px-3 py-2 bg-yellow-100 text-yellow-800 rounded">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                        </svg>
+                        <span id="statusText">Waiting for connection...</span>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -46,10 +57,17 @@
             <div class="space-y-4">
                 <h2 class="text-xl font-semibold text-gray-800">Download Files</h2>
                 <div id="fileListDownload" class="space-y-2"></div>
+                <div id="errorMessage" class="hidden text-center text-red-500 mt-4"></div>
+                <div id="progressContainer" class="hidden mt-4">
+                    <p class="text-sm font-medium text-gray-700 mb-2">Download Progress:</p>
+                    <div class="w-full bg-gray-200 rounded-full h-2.5">
+                        <div id="progressBar" class="bg-blue-600 h-2.5 rounded-full" style="width: 0%"></div>
+                    </div>
+                    <p id="progressText" class="text-xs text-gray-500 mt-1">0%</p>
+                </div>
             </div>
         </div>
     </div>
-
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             // DOM elements
@@ -63,9 +81,38 @@
             const copyButton = document.getElementById('copyButton');
             const downloadSection = document.getElementById('downloadSection');
             const fileListDownload = document.getElementById('fileListDownload');
+            const errorMessage = document.getElementById('errorMessage');
+            const connectionStatus = document.getElementById('connectionStatus');
+            const statusIndicator = document.getElementById('statusIndicator');
+            const statusText = document.getElementById('statusText');
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
             
             let selectedFiles = [];
-            let sharedFiles = [];
+            let peer = null;
+            let connections = [];
+            let fileChunks = {};
+            let currentDownload = null;
+            
+            // Initialize PeerJS with a random ID
+            function initPeer() {
+                peer = new Peer();
+                
+                peer.on('open', (id) => {
+                    console.log('My peer ID is: ' + id);
+                });
+                
+                peer.on('connection', (conn) => {
+                    handleIncomingConnection(conn);
+                });
+                
+                peer.on('error', (err) => {
+                    console.error('PeerJS error:', err);
+                    statusText.textContent = 'Connection error: ' + err.type;
+                    statusIndicator.className = 'flex items-center px-3 py-2 bg-red-100 text-red-800 rounded';
+                });
+            }
             
             // File selection
             browseButton.addEventListener('click', () => {
@@ -158,82 +205,246 @@
             createLinkButton.addEventListener('click', () => {
                 if (selectedFiles.length === 0) return;
                 
-                // Create a data URL for each file
-                const filePromises = selectedFiles.map(file => {
-                    return new Promise((resolve) => {
-                        const reader = new FileReader();
-                        reader.onload = (e) => {
-                            resolve({
-                                name: file.name,
-                                size: file.size,
-                                type: file.type,
-                                dataUrl: e.target.result
-                            });
-                        };
-                        reader.readAsDataURL(file);
-                    });
-                });
+                // Initialize PeerJS if not already done
+                if (!peer) {
+                    initPeer();
+                }
                 
-                Promise.all(filePromises).then(files => {
-                    // Store files in local storage
-                    localStorage.setItem('sharedFiles', JSON.stringify(files));
-                    
-                    // Create shareable URL
-                    const shareableLink = `${window.location.origin}${window.location.pathname}?share=${Date.now()}`;
-                    
-                    // Show share link
-                    shareLink.classList.remove('hidden');
-                    linkInput.value = shareableLink;
-                });
+                // Show connection status
+                connectionStatus.classList.remove('hidden');
+                statusText.textContent = 'Waiting for someone to connect...';
+                statusIndicator.className = 'flex items-center px-3 py-2 bg-yellow-100 text-yellow-800 rounded';
+                
+                // Create shareable URL with peer ID
+                setTimeout(() => {
+                    if (peer.id) {
+                        const shareableLink = `${window.location.origin}${window.location.pathname}?peer=${peer.id}`;
+                        
+                        // Show share link
+                        shareLink.classList.remove('hidden');
+                        linkInput.value = shareableLink;
+                    } else {
+                        statusText.textContent = 'Failed to get peer ID. Please try again.';
+                        statusIndicator.className = 'flex items-center px-3 py-2 bg-red-100 text-red-800 rounded';
+                    }
+                }, 1000);
             });
             
             // Copy link
-            copyButton.addEventListener('click', () => {
-                linkInput.select();
-                document.execCommand('copy');
-                alert('Link copied to clipboard!');
+            copyButton.addEventListener('click', async () => {
+                try {
+                    await navigator.clipboard.writeText(linkInput.value);
+                    alert('Link copied to clipboard!');
+                } catch (err) {
+                    console.error('Failed to copy: ', err);
+                    linkInput.select();
+                    document.execCommand('copy');
+                    alert('Link copied to clipboard!');
+                }
             });
             
-            // Update download list
-            function updateDownloadList() {
-                fileListDownload.innerHTML = '';
+            // Handle incoming connections
+            function handleIncomingConnection(conn) {
+                connections.push(conn);
                 
-                sharedFiles.forEach((file, index) => {
-                    const fileItem = document.createElement('div');
-                    fileItem.className = 'flex items-center justify-between bg-gray-50 p-3 rounded';
-                    fileItem.innerHTML = `
-                        <div class="flex items-center">
-                            <svg class="w-6 h-6 text-gray-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                            </svg>
-                            <div>
-                                <p class="text-sm font-medium text-gray-700">${file.name}</p>
-                                <p class="text-xs text-gray-500">${formatFileSize(file.size)}</p>
-                            </div>
-                        </div>
-                        <a href="${file.dataUrl}" download="${file.name}" class="text-blue-500 hover:text-blue-700 download-btn">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-                            </svg>
-                        </a>
-                    `;
-                    fileListDownload.appendChild(fileItem);
+                statusText.textContent = 'Connected! Transferring files...';
+                statusIndicator.className = 'flex items-center px-3 py-2 bg-green-100 text-green-800 rounded';
+                
+                conn.on('open', () => {
+                    conn.on('data', (data) => {
+                        if (data.type === 'file-info') {
+                            // Send file chunks
+                            sendFileChunks(conn, data.file);
+                        } else if (data.type === 'file-chunk') {
+                            // Store received file chunk
+                            if (!fileChunks[data.fileId]) {
+                                fileChunks[data.fileId] = {
+                                    chunks: [],
+                                    file: data.file,
+                                    totalChunks: data.totalChunks,
+                                    receivedChunks: 0
+                                };
+                            }
+                            
+                            fileChunks[data.fileId].chunks[data.chunkIndex] = data.chunk;
+                            fileChunks[data.fileId].receivedChunks++;
+                            
+                            // Update progress
+                            const progress = (fileChunks[data.fileId].receivedChunks / fileChunks[data.fileId].totalChunks) * 100;
+                            progressBar.style.width = progress + '%';
+                            progressText.textContent = Math.round(progress) + '%';
+                            
+                            // Check if all chunks received
+                            if (fileChunks[data.fileId].receivedChunks === fileChunks[data.fileId].totalChunks) {
+                                const fileData = fileChunks[data.fileId];
+                                const blob = new Blob(fileData.chunks);
+                                const url = URL.createObjectURL(blob);
+                                
+                                // Add to download list
+                                addFileToDownloadList(fileData.file, url);
+                                
+                                // Clean up
+                                delete fileChunks[data.fileId];
+                                
+                                // Close connection
+                                conn.close();
+                            }
+                        }
+                    });
+                });
+                
+                conn.on('close', () => {
+                    console.log('Connection closed');
+                    connections = connections.filter(c => c !== conn);
                 });
             }
             
-            // Check for shared files in URL
-            const urlParams = new URLSearchParams(window.location.search);
-            const shareId = urlParams.get('share');
-            if (shareId) {
-                // Load shared files from local storage
-                const storedFiles = localStorage.getItem('sharedFiles');
-                if (storedFiles) {
-                    sharedFiles = JSON.parse(storedFiles);
-                    downloadSection.classList.remove('hidden');
-                    updateDownloadList();
-                } else {
-                    alert('No files found for this link');
+            // Send file in chunks
+            function sendFileChunks(conn, file) {
+                const CHUNK_SIZE = 64 * 1024; // 64KB chunks
+                const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+                let chunksSent = 0;
+                
+                // First send file info
+                conn.send({
+                    type: 'file-info',
+                    file: {
+                        name: file.name,
+                        size: file.size,
+                        type: file.type
+                    }
+                });
+                
+                // Then send chunks
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const chunk = e.target.result;
+                    conn.send({
+                        type: 'file-chunk',
+                        fileId: file.name,
+                        chunkIndex: chunksSent,
+                        totalChunks: totalChunks,
+                        chunk: chunk
+                    });
+                    
+                    chunksSent++;
+                    if (chunksSent < totalChunks) {
+                        readNextChunk();
+                    }
+                };
+                
+                function readNextChunk() {
+                    const start = chunksSent * CHUNK_SIZE;
+                    const end = Math.min(start + CHUNK_SIZE, file.size);
+                    const slice = file.slice(start, end);
+                    reader.readAsArrayBuffer(slice);
                 }
+                
+                readNextChunk();
+            }
+            
+            // Add file to download list
+            function addFileToDownloadList(file, url) {
+                // Show download section
+                downloadSection.classList.remove('hidden');
+                errorMessage.classList.add('hidden');
+                
+                const fileItem = document.createElement('div');
+                fileItem.className = 'flex items-center justify-between bg-gray-50 p-3 rounded';
+                fileItem.innerHTML = `
+                    <div class="flex items-center">
+                        <svg class="w-6 h-6 text-gray-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <div>
+                            <p class="text-sm font-medium text-gray-700">${file.name}</p>
+                            <p class="text-xs text-gray-500">${formatFileSize(file.size)}</p>
+                        </div>
+                    </div>
+                    <a href="${url}" download="${file.name}" class="text-blue-500 hover:text-blue-700 download-btn">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                        </svg>
+                    </a>
+                `;
+                fileListDownload.appendChild(fileItem);
+            }
+            
+            // Check for peer ID in URL and connect
+            const urlParams = new URLSearchParams(window.location.search);
+            const peerId = urlParams.get('peer');
+            if (peerId) {
+                // Initialize PeerJS if not already done
+                if (!peer) {
+                    initPeer();
+                }
+                
+                // Show download section
+                downloadSection.classList.remove('hidden');
+                
+                // Connect to the peer
+                const conn = peer.connect(peerId);
+                
+                // Show progress container
+                progressContainer.classList.remove('hidden');
+                
+                conn.on('open', () => {
+                    statusText.textContent = 'Connected! Waiting for files...';
+                    statusIndicator.className = 'flex items-center px-3 py-2 bg-green-100 text-green-800 rounded';
+                });
+                
+                conn.on('data', (data) => {
+                    if (data.type === 'file-info') {
+                        // Send acknowledgment
+                        conn.send({ type: 'ack', fileId: data.file.name });
+                        
+                        // Set up to receive chunks
+                        fileChunks[data.file.name] = {
+                            chunks: [],
+                            file: data.file,
+                            totalChunks: Math.ceil(data.file.size / (64 * 1024)), // 64KB chunks
+                            receivedChunks: 0
+                        };
+                    } else if (data.type === 'file-chunk') {
+                        // Store received file chunk
+                        fileChunks[data.fileId].chunks[data.chunkIndex] = data.chunk;
+                        fileChunks[data.fileId].receivedChunks++;
+                        
+                        // Update progress
+                        const progress = (fileChunks[data.fileId].receivedChunks / fileChunks[data.fileId].totalChunks) * 100;
+                        progressBar.style.width = progress + '%';
+                        progressText.textContent = Math.round(progress) + '%';
+                        
+                        // Check if all chunks received
+                        if (fileChunks[data.fileId].receivedChunks === fileChunks[data.fileId].totalChunks) {
+                            const fileData = fileChunks[data.fileId];
+                            const blob = new Blob(fileData.chunks);
+                            const url = URL.createObjectURL(blob);
+                            
+                            // Add to download list
+                            addFileToDownloadList(fileData.file, url);
+                            
+                            // Clean up
+                            delete fileChunks[data.fileId];
+                            
+                            // Close connection
+                            conn.close();
+                            
+                            // Hide progress
+                            progressContainer.classList.add('hidden');
+                        }
+                    }
+                });
+                
+                conn.on('error', (err) => {
+                    console.error('Connection error:', err);
+                    errorMessage.textContent = 'Connection error: ' + err.type;
+                    errorMessage.classList.remove('hidden');
+                });
+                
+                conn.on('close', () => {
+                    console.log('Connection closed');
+                });
             }
         });
     </script>
